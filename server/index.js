@@ -1,51 +1,60 @@
 const express = require('express');
 const app = express();
-const http = require('http').Server(app);
+const http = require('http')
+const easyrtc = require("open-easyrtc");
+const socketIo = require("socket.io");
+const port = process.env.PORT || 8080;
+app.use(express.static("public"));
+
+// Set process name
+process.title = "networked-aframe-server";
 
 
-const port = process.env.PORT || 8000;
-app.use(express.static(__dirname + '/public'));
-
-app.get('/', (req, res) => {
-    res.send('Hello World!');
-    });
 const webServer = http.createServer(app);
-io = require('socket.io')(http);
+const socketServer = socketIo(webServer, {"log level":1});
 
-const rooms = {};
+const myIceServers = [
+  {"urls":"stun:stun1.l.google.com:19302"},
+  {"urls":"stun:stun2.l.google.com:19302"},
+];
+easyrtc.setOption("appIceServers", myIceServers);
+easyrtc.setOption("logLevel", "debug");
+easyrtc.setOption("demosEnable", false);
 
-io.on('connection', (socket) => {
-    console.log('a user connected',socket.id); 
-
-    let currentRoom = null;
-
-    socket.on('joinRoom', (data) => {
-        const {room} = data;
-        if (!rooms[room]) {
-            rooms[room] = {
-                name: room,
-                users: {},
-            };
+// Overriding the default easyrtcAuth listener, only so we can directly access its callback
+easyrtc.events.on("easyrtcAuth", (socket, easyrtcid, msg, socketCallback, callback) => {
+    easyrtc.events.defaultListeners.easyrtcAuth(socket, easyrtcid, msg, socketCallback, (err, connectionObj) => {
+        if (err || !msg.msgData || !msg.msgData.credential || !connectionObj) {
+            callback(err, connectionObj);
+            return;
         }
 
-        const joinedTime = new Date().now()
-        rooms[room].users[socket.id] = joinedTime;
-        currentRoom = room;
-        console.log(`User ${socket.id} joined room ${room}`);
-        socket.join(room);
+        connectionObj.setField("credential", msg.msgData.credential, {"isShared":false});
 
-        socket.emit("connected", {joinedTime});
-        const occupants = Object.keys(rooms[room].users);
-        io.in(currentRoom).emit("occupantsChanged", {occupants});
+        console.log("["+easyrtcid+"] Credential saved!", connectionObj.getFieldValueSync("credential"));
 
+        callback(err, connectionObj);
     });
-
-    // socket.on("send", (data) => {
-    //     )
-
 });
 
+// To test, lets print the credential to the console for every room join!
+easyrtc.events.on("roomJoin", (connectionObj, roomName, roomParameter, callback) => {
+    console.log("["+connectionObj.getEasyrtcid()+"] Credential retrieved!", connectionObj.getFieldValueSync("credential"));
+    easyrtc.events.defaultListeners.roomJoin(connectionObj, roomName, roomParameter, callback);
+});
+
+// Start EasyRTC server
+easyrtc.listen(app, socketServer, null, (err, rtcRef) => {
+    console.log("Initiated");
+
+    rtcRef.events.on("roomCreate", (appObj, creatorConnectionObj, roomName, roomOptions, callback) => {
+        console.log("roomCreate fired! Trying to create: " + roomName);
+
+        appObj.events.defaultListeners.roomCreate(appObj, creatorConnectionObj, roomName, roomOptions, callback);
+    });
+});
+
+// Listen on port
 webServer.listen(port, () => {
-    console.log(`Example app listening at http://localhost:${port}`);
-}
-);
+    console.log("listening on http://localhost:" + port);
+});
