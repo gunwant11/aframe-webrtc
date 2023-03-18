@@ -1,27 +1,32 @@
-const express = require('express');
-const app = express();
-const http = require('http')
-const easyrtc = require("open-easyrtc");
-const socketIo = require("socket.io");
-const port = process.env.PORT || 8080;
-app.use(express.static("public"));
 
-// Set process name
+const http = require("http");                 
+const path = require("path");
+const express = require("express");           
+const socketIo = require("socket.io");        
+const easyrtc = require("open-easyrtc");      
+
 process.title = "networked-aframe-server";
 
+const port = process.env.PORT || 8080;
+
+const app = express();
+app.use(express.static("public"));
 
 const webServer = http.createServer(app);
-const socketServer = socketIo(webServer, {"log level":1});
 
+const socketServer = socketIo(webServer, {"log level": 1,
+    "allowEIO3": true,
+});
 const myIceServers = [
   {"urls":"stun:stun1.l.google.com:19302"},
   {"urls":"stun:stun2.l.google.com:19302"},
+
 ];
 easyrtc.setOption("appIceServers", myIceServers);
 easyrtc.setOption("logLevel", "debug");
 easyrtc.setOption("demosEnable", false);
 
-// Overriding the default easyrtcAuth listener, only so we can directly access its callback
+
 easyrtc.events.on("easyrtcAuth", (socket, easyrtcid, msg, socketCallback, callback) => {
     easyrtc.events.defaultListeners.easyrtcAuth(socket, easyrtcid, msg, socketCallback, (err, connectionObj) => {
         if (err || !msg.msgData || !msg.msgData.credential || !connectionObj) {
@@ -37,13 +42,12 @@ easyrtc.events.on("easyrtcAuth", (socket, easyrtcid, msg, socketCallback, callba
     });
 });
 
-// To test, lets print the credential to the console for every room join!
 easyrtc.events.on("roomJoin", (connectionObj, roomName, roomParameter, callback) => {
     console.log("["+connectionObj.getEasyrtcid()+"] Credential retrieved!", connectionObj.getFieldValueSync("credential"));
     easyrtc.events.defaultListeners.roomJoin(connectionObj, roomName, roomParameter, callback);
 });
 
-// Start EasyRTC server
+
 easyrtc.listen(app, socketServer, null, (err, rtcRef) => {
     console.log("Initiated");
 
